@@ -1,0 +1,147 @@
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background-color: rgb(194, 194, 194);
+}
+
+.topnav {
+  overflow: hidden;
+  background-color: #d8d8d8;
+}
+
+.topnav a {
+  float: left;
+  display: block;
+  color: black;
+  text-align: center;
+  padding: 14px 16px;
+  text-decoration: none;
+  font-size: 17px;
+}
+
+.topnav a:hover {
+  background-color: rgb(255, 255, 255);
+  color: black;
+}
+
+.topnav a.active {
+  background-color: #f32121;
+  color: white;
+}
+.topnav a.active:hover {
+  background-color: #ffffff;
+  color: rgb(0, 0, 0);
+}
+
+.topnav .search-container {
+  display: inline-block;
+  padding-left: 5px;
+  margin-top: 3px;
+  width: 40%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+form.example input[type=text] {
+  padding: 10px;
+  font-size: 17px;
+  border: 1px solid rgb(0, 0, 0);
+  float: left;
+  width: 93%;
+  background: #ffffff;
+  color: black;
+}
+
+form.example button {
+  float: left;
+  width: 7%;
+  padding: 10px;
+  background: #f32121;
+  color: white;
+  font-size: 17px;
+  border: 1px solid rgb(0, 0, 0);
+  border-left: none;
+  cursor: pointer;
+}
+
+form.example button:hover {
+  background: #ffffff;
+  color: black;
+}
+
+form.example::after {
+  content: "";
+  clear: both;
+  display: table;
+}
+  
+.wrapper{
+    margin-top: 50px;
+    background-color: rgb(255, 255, 255);
+    padding-bottom: 50px;
+  }
+.headings1{
+   font-family: Arial, Helvetica, sans-serif;
+   color: rgb(0, 0, 0);
+   padding-left: 20px;
+   padding-top: 15px;
+ }
+.carousel {
+  background: #EEE;
+}
+
+.carousel-cell {
+  margin-right: 20px;
+  overflow: hidden;
+}
+
+.carousel-cell img {
+  display: block;
+  height: 300px;
+}
+
+.alertbox {
+
+  background-color: #EEE;
+
+  z-index: 1;
+  position : fixed;
+  display: block;
+  top : 50%;
+  left : 50%;
+  transform: translateX(-50%) translateY(-50%);
+
+  width : 50%;
+  height: 50%;
+
+  box-shadow: 9px 5px 31px 0px rgba(63,63,63,0.72);
+  -webkit-box-shadow: 9px 5px 31px 0px rgba(63,63,63,0.72);
+  -moz-box-shadow: 9px 5px 31px 0px rgba(63,63,63,0.72);
+}
+
+.alertbox-nav {
+
+  display: flex;
+  flex-direction: row-reverse;
+ 
+  margin-top: 1rem;
+  margin-right: 1rem;
+}
+
+.alertbox-data{
+
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+
+}
+
+.alertbox-table {
+
+  border: solid 2px lightgrey;
+  border-collapse: collapse;
+
+}

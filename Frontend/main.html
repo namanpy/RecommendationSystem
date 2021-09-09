@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title> Home </title>
+        <link rel="shortcut icon" href="files/icon.png">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="stylesheet.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+        <link type="text/css" rel="stylesheet" href="flickity/flickity.css"/>
+        <script type="text/javascript" src="flickity/flickity.pkgd.js"></script>
+    </head>
+    <body>
+        <div id="topnav" class="topnav">
+            <a class="active" href="#home">Home</a>
+            <a href="#genres">Genres</a>
+            <a href="#about">About</a>
+            <div class="search-container">
+                <form class="example" action="/action_page.php">
+                    <input type="text" placeholder="Search.." name="search2">
+                    <button type="submit"><i class="fa fa-search"></i></button>
+                  </form>
+              </div>
+            </div>
+            <div  class="wrapper">
+                <div id="collab-title-window" class="tile-window">
+                    <h1  class="headings1">Recommended for you</h1>
+                    
+                </div>
+
+            </div>
+            <div  class="wrapper">
+                <div id="similar-title-window" class="tile-window">
+                    <h1  class="headings1">Because you watched <div id="movietitle">ree</div></h1>
+                    
+                </div>
+
+            </div>
+        </div>
+        <div id="alertBoxContainer" >
+
+        </div>
+
+    </body>
+    <script>
+        var baseURL = "http://localhost:5000";
+
+
+        function CloseAlertBox() {
+            $("#alertBoxContainer").html("");
+        }
+
+        function OpenAlertBox(data) {
+            console.log("hiiiii")
+            let alertBoxContentStart = `
+                <div class="alertbox">
+                    <div class="alertbox-nav">
+                        <a class="alertbox-close" onclick="CloseAlertBox()">Close</a> 
+                    </div>
+                    <div class="alertbox-data">
+                        <table class="alertbox-table">
+
+                        </table>
+                    </div>
+                </div>        
+            `
+            
+            $("#alertBoxContainer").html(alertBoxContentStart);
+
+
+            let row = `
+                <tr>
+           `
+
+            for(key in data) {
+                let row = `
+                <tr>
+                `
+                row += `<td> <b> ${key} </b> </td>` + `<td> ${data[key]} </td>`
+                row += `</tr>`
+                $(".alertbox-table").append(row);
+
+            }
+
+        }
+
+
+        async function CollabFilteringCatalogue(userid) {
+
+            return new Promise( (resolve, reject) => {
+                let subURL = "/movies/filter/collab";
+                
+                let url = baseURL + subURL;
+
+                let req = new XMLHttpRequest();
+                
+                req.onreadystatechange = function() {
+
+                    if(this.readyState == 4 && this.status == 200) {
+
+                        //console.log(this.responseText);
+                        resolve(JSON.parse(this.responseText));
+
+                    }
+
+                }
+
+
+                req.open("POST", url);
+                req.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+                req.send(JSON.stringify( { user : userid } ));
+            });
+
+        }
+        async function ItemFilteringCatalogue(userid) {
+
+            return new Promise( (resolve, reject) => {
+                let subURL = "/movies/filter/similar";
+                
+                let url = baseURL + subURL;
+
+                let req = new XMLHttpRequest();
+                
+                req.onreadystatechange = function() {
+
+                    if(this.readyState == 4 && this.status == 200) {
+
+                       // console.log(this.responseText);
+                        resolve(JSON.parse(this.responseText));
+
+                    }
+
+                }
+
+
+                req.open("POST", url);
+                req.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+                req.send(JSON.stringify( { user : userid } ));
+            });
+
+        }
+
+
+
+        $("document").ready(function() {
+            var url = new URL(document.location.href);  
+            var user_id = url.searchParams.get("user_id");
+            user_id  = Number.parseInt(user_id)
+            if(user_id != undefined) {
+                if(typeof user_id  == "number") {
+                    CollabFilteringCatalogue(user_id).then((response) => {
+
+                        var container = (`                
+                            <div id="collabcatalogue" class="carousel" data-flickity='{  "imagesLoaded" : true,  "percentPosition": false }'>
+                        `);
+
+                        for(let i = 0; i < response.data.length; i++) {
+
+                            let movie = response.data[i];
+                            let content = `\n<div onclick='OpenAlertBox(${JSON.stringify(response.data[i])})' class="carousel-cell"><img src="${movie.cover}"/></div>`
+                            container += content; 
+
+                        }
+                        $("#collab-title-window").append(container);
+
+                        //flkty.flickity('destroy');
+                        $("#collabcatalogue").flickity( { imagesLoaded : true, initialIndex : 0, cellAlign : "left" }   );
+
+                    }).catch(err => console.log(err));
+
+
+
+
+
+
+
+                    ItemFilteringCatalogue(user_id).then((response) => {
+
+                        var container = (`                
+                            <div id="similarcatalogue" class="carousel" data-flickity='{  "imagesLoaded" : true,  "percentPosition": false }'>
+                        `);
+
+                        for(let i = 0; i < response.data.length; i++) {
+
+                            let movie = response.data[i];
+                            let content = `\n<div onclick='OpenAlertBox(${JSON.stringify(response.data[i])})' class="carousel-cell"><img src="${movie.cover}"/></div>`
+                            container += content; 
+
+                        }
+                        $("#similar-title-window").append(container);
+                        $("#movietitle").text(response.base_movie[0].title)
+                        console.log(response.base_movie)
+                        //flkty.flickity('destroy');
+                        $("#similarcatalogue").flickity( { imagesLoaded : true, initialIndex : 0, cellAlign : "left" }   );
+
+                        }).catch(err => console.log(err));
+                    }
+            }
+        });
+
+
+
+    </script>
+</html>
