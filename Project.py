@@ -2,29 +2,54 @@
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-# drive.mount("/content/gdrive")
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import datasets
+from torchvision.transforms import ToTensor
+import pandas as pd
+import numpy as np
 
-# folder_location = "/content/gdrive/MyDrive/MovieLens/"
+import torch.nn as nn
+import torch.nn.functional as F
+
+from Model.model import ParseGenre, WreckEm
+
+
 folder_location = "Dataset/"
 
-
-
-# users.dat > user_id | gender | age |  ??
-# movies.dat > movie_id | title | genres
-# ratings.dat > user_id | movie_id | rating | timestamp
+# LOAD CSV FILES
 
 users = pd.read_csv( folder_location + "users.dat", delimiter="::")
-movies = pd.read_csv( folder_location + "movies.csv")
-ratings = pd.read_csv( folder_location + "ratings.csv", nrows=100000)
+movies = pd.read_csv( folder_location + "movies_training.csv")
+ratings = pd.read_csv( folder_location + "ratings_training.csv", nrows=1000000)
 links = pd.read_csv( folder_location + "links.csv", dtype={'imdbId': str })
 
 
-
-movies["release_date"] = 0
-movies["cover"] = 0
-movies.to_csv(folder_location + "movies.csv", index=False)
+print("Movies Data-Set len is ", len(movies))
+print("Total unique users ", len(ratings.userId.unique()))
 
 
+
+#LOAD PYTHON MODEL
+
+model_location = "Model/model_rev1.pth"
+
+usersLen = int(ratings.userId.max()) + 1
+moviesLen = int(ratings.movieId.max()) + 1
+
+model = WreckEm(moviesLen, usersLen)
+
+try:
+  model.load_state_dict(torch.load(model_location))
+except FileNotFoundError as e:
+  print("No save file found.")
+
+model.eval()
+
+
+
+
+# User x Movies - Matrix
 
 user_rating_matrix = pd.pivot_table(ratings, values="rating", index="userId",
                     columns="movieId")           
@@ -38,7 +63,7 @@ user_rating_matrix = user_rating_matrix.fillna(0)
 #                  method-to-group-similar-users, 
 #                  user-id of user we are finding matches for, 
 #                  number of similar users to find)
-def GetSimilarUsers(_dframe, method="cosine", user_id=0, n=10):
+def GetSimilarUsers(_dframe, method="cosine", user_id=0, n=200):
   
   user = _dframe[_dframe.index == user_id]
   otherUsers = _dframe[_dframe.index != user_id]
@@ -84,6 +109,7 @@ def RecommendMoviesByRating(similarity_index, user_rating_matrix, movies, n):
 
 
 def GetSimilarMovies(movieId, movies):
+  #movieId = 4896
   movieAndLabelMatrix = { "movieId" : [] }
 
   for i in range(0, len(movies)):
@@ -119,18 +145,49 @@ def GetSimilarMovies(movieId, movies):
   similarity = pd.DataFrame({ "movieId" : _otherMovies.index, "similarity" : similarity  }) 
   similarity = similarity.sort_values(by=['similarity'], ascending=False).merge(movies)
 
+  referenceMovie = movies[movies.movieId == movieId]
 
-  similarity =  similarity[0 : 50]
+  #similarity.loc[referenceMovie["popular_cast"].item() == similarity.popular_cast, "similarity"] *= 1.25
 
-  
+  for i in range(0, len(similarity)):
+    if(referenceMovie["popular_cast"].item() == similarity.iloc[i]["popular_cast"]):
+      similarity.loc[i,"similarity"] *= 2
+  similarity = similarity.sort_values(by=["similarity"], ascending=False)
+  similarity =  similarity[0 : 50]  
   return similarity
   
   #print(similarity.head(50))
   #print(movies[movies.movie_id.isin(similarity.movie_id)].head())
 
 #GetSimilarMovies(3448)
-  
+def GetFavoriteActors(userId):
+  moviesRatedByUser = ratings[ratings.userId == userId]
+  actorRating = {}
+  moviesRatedByUser = moviesRatedByUser.dropna();
+  for i in range(0, len(moviesRatedByUser)):
+    try:
+      if(movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"].item()]["popular_cast"].item() != np.nan):
+        if(movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"].item()]["popular_cast"].item() in actorRating.keys()):
+          actorRating[movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"].item()]["popular_cast"].item()].append(moviesRatedByUser.iloc[i]["rating"].item())
+        else:
+          
+          actorRating[movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"]]["popular_cast"].item()] = []
+          actorRating[movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"]]["popular_cast"].item()].append(moviesRatedByUser.iloc[i]["rating"].item())
+    except Exception as e:
+      print("Error", movies[movies.movieId == moviesRatedByUser.iloc[i]["movieId"].item()]["popular_cast"].item())
+  actorRatingDf = { "actor" : [] , "rating" : []}
+  for key in actorRating.keys():
+    actorRatingDf["actor"].append(key)
+    
+    averageRating = (sum(actorRating[key]) / len(actorRating[key])) * (1.025 ** len(actorRating[key]))
+    # print(len(actorRating[key]))s
+    actorRatingDf["rating"].append(averageRating)
+  actorRatingDf = pd.DataFrame(actorRatingDf)
+  actorRatingDf.dropna(inplace=True)
+  actorRatingDf = actorRatingDf.sort_values(by=["rating"], ascending=False)
+  return actorRatingDf
 
+print(GetFavoriteActors(99).head(100))
 
 
 from bs4 import BeautifulSoup
@@ -230,34 +287,34 @@ import numpy as np
 tmdbAPI = TMDB_API()
 tmdbAPI.SetDataSet(links)
 
-def DownloadBatch(dataset):
-  dataset.reset_index(inplace=True)
+# def DownloadBatch(dataset):
+#   dataset.reset_index(inplace=True)
 
 
-  for i in range(0, len(dataset) ):
+#   for i in range(0, len(dataset) ):
 
-    if(movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"].item() == 0 ):
-      val = tmdbAPI.GetMovieCover(dataset.iloc[i]["movieId"].astype(int))
-      dataset.loc[i, "cover"] = val
-      movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"] = val
-    else:
-      dataset.loc[i, "cover"]  = movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"].item()
-  movies.to_csv(folder_location + "movies.csv", index=False)
-
-
+#     if(movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"].item() == 0 ):
+#       val = tmdbAPI.GetMovieCover(dataset.iloc[i]["movieId"].astype(int))
+#       dataset.loc[i, "cover"] = val
+#       movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"] = val
+#     else:
+#       dataset.loc[i, "cover"]  = movies.loc[movies.movieId == dataset.loc[i, "movieId"],"cover"].item()
+#   movies.to_csv(folder_location + "movies.csv", index=False)
 
 
-def DownloadBatch_ReleaseDate(dataset):
-  dataset.reset_index(inplace=True)
 
-  for i in range(0, len(dataset) ):
-    if(movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"].item() == 0 ):
-      val =  int(tmdbAPI.GetReleaseDate(dataset.loc[i, "movieId"]))
-      dataset.loc[i, "release_date"] = val
-      movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"] = val
-    else:
-      dataset.loc[i, "release_date"] = movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"].item()
-  movies.to_csv(folder_location + "movies.csv", index=False)
+
+# def DownloadBatch_ReleaseDate(dataset):
+#   dataset.reset_index(inplace=True)
+
+#   for i in range(0, len(dataset) ):
+#     if(movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"].item() == 0 ):
+#       val =  int(tmdbAPI.GetReleaseDate(dataset.loc[i, "movieId"]))
+#       dataset.loc[i, "release_date"] = val
+#       movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"] = val
+#     else:
+#       dataset.loc[i, "release_date"] = movies.loc[movies.movieId == dataset.loc[i, "movieId"], "release_date"].item()
+#   movies.to_csv(folder_location + "movies.csv", index=False)
 
 
 def MakeImageDataSet():
@@ -280,43 +337,32 @@ def MakeImageDataSet():
     if(i % 10 == 0):
       movies.to_csv("movies.csv", index=False)
 
-def AddReleaseDate(movies):
-  #set full  Release Date column empty  
-  #movies["release_date"] = 0;
+# def AddReleaseDate(movies):
+#   #set full  Release Date column empty  
+#   #movies["release_date"] = 0;
 
-  #Get the release date from title and assign that release date to its respective column 
-  #for i in range(0, len(movies), int(len(movies))):
-    #th = threading.Thread(target=DownloadBatch_ReleaseDate,args=( i , int(i + 1000)) )
-    #th.start()
-    #movies.loc[i, "release_date"] = tmdbAPI.GetReleaseDate(movies.iloc[i].movieId.item())
-  DownloadBatch_ReleaseDate(0, len(movies) )
-# if 1:
-#   AddReleaseDate(movies)
+#   #Get the release date from title and assign that release date to its respective column 
+#   #for i in range(0, len(movies), int(len(movies))):
+#     #th = threading.Thread(target=DownloadBatch_ReleaseDate,args=( i , int(i + 1000)) )
+#     #th.start()
+#     #movies.loc[i, "release_date"] = tmdbAPI.GetReleaseDate(movies.iloc[i].movieId.item())
+#   DownloadBatch_ReleaseDate(0, len(movies) )
+# # if 1:
+# #   AddReleaseDate(movies)
 
 
-if False:
-  print( "Total movie dataset len is : ", len(movies))
-  MakeImageDataSet()
-# DownloadBatch(0,10)
+# if False:
+#   print( "Total movie dataset len is : ", len(movies))
+#   MakeImageDataSet()
+
+
 movies.fillna("", inplace=True)
-#imdbAPI.GetMovieCover(1)
+ratings.fillna("", inplace=True)
 
 
 from flask import Flask, request, jsonify
 
 
-# class WebServer:
-  
-#   port = 8080
-#   app = None
-#   def __init__(self, port):
-#     self.app = Flask(__name__)
-  
-#   @self.app.route("/movies/filter/collab")
-#   def GetCollabFiltering():
-#     body = request.get_json()
-#     if("user" in body.keys()):
-#       user = body["user"]
 
 
 import json
@@ -338,18 +384,16 @@ def GetCollabFiltering():
     user = body["user"]
 
 
-    similarity_index = GetSimilarUsers(user_rating_matrix, "cosine", user, 20)
+    similarity_index = GetSimilarUsers(user_rating_matrix, "cosine", user, 100)
     recommended_movies  = RecommendMoviesByRating(similarity_index, user_rating_matrix, movies, 50)
     recommended_movies = recommended_movies.to_frame()
     recommended_movies = recommended_movies.merge(movies, left_index=True, right_index=True)
 
-    print(recommended_movies.head())
+    print(similarity_index.head(10))
 
-    DownloadBatch(recommended_movies)
-    DownloadBatch_ReleaseDate(recommended_movies)
-    recommended_movies.fillna(0)
+    recommended_movies.fillna(-1)
     _data = (recommended_movies.to_dict( orient='records'))
-   # print({ "message" : "success" , "data" : _data })
+
     return json.dumps({ "message" : "success" , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
   else:
     return { "error" : "User is not defined in request."} , 400
@@ -363,20 +407,65 @@ def GetSimilarItemFiltering():
     user = body["user"]
 
     randomUserRating = ratings[ratings.userId == user].sample(n=1)
-    baseMovie = movies[movies.movieId == randomUserRating.movieId.item()]
-    similarMovies = GetSimilarMovies(randomUserRating.movieId.item(), movies)
+    baseMovie = movies[movies.movieId == randomUserRating.movieId.item()] #Original
+    similarMovies = GetSimilarMovies(randomUserRating.movieId.item(), movies) #Original
+
+    # baseMovie = movies[movies.movieId == 4896]
+
+    # similarMovies = GetSimilarMovies(4896, movies)
 
     print(similarMovies.head())
 
-    DownloadBatch(similarMovies)
-    DownloadBatch_ReleaseDate(similarMovies)
     baseMovie = baseMovie.to_dict(orient="records")
-    similarMovies.fillna(0)
+    similarMovies.fillna(-1)
 
     _data = (similarMovies.to_dict( orient='records'))
-    #print({ "message" : "success" , "data" : _data })
+
     return json.dumps({ "message" : "success" , "base_movie" : baseMovie , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
   else:
     return { "error" : "User is not defined in request."} , 400
+
+@app.route("/movies/filter/ai", methods=["POST"])
+def AiFiltering():
+  body = request.get_json()
+  if(body is not None and "user" in body.keys()):
+    user = body["user"]
+    moviesWatchedByUser = ratings[ratings.userId == user].movieId
+    
+    moviesUnwatched = movies[~movies.movieId.isin(moviesWatchedByUser)]
+    moviesUnwatched = moviesUnwatched.sample(n=1000)
+
+    data = []
+    model.eval()
+    for i in range(0, len(moviesUnwatched) - 1):
+      userId = torch.LongTensor([ user ])
+      movieId = torch.LongTensor([ moviesUnwatched.iloc[i]["movieId"].item() ])
+      genre = torch.Tensor([ParseGenre(moviesUnwatched.iloc[i]["genres"])])
+      vote_average = torch.Tensor([ [  moviesUnwatched.iloc[i]["vote_average"].item()/ 10.0  ] ])
+      release_date = None
+      
+      recommendation = model(userId, movieId, genre, vote_average, release_date)
+      
+      data.append( {
+            "0": recommendation.item(),
+            "movieId": moviesUnwatched.iloc[i].movieId.item(),
+            "title": moviesUnwatched.iloc[i].title,
+            "genres": moviesUnwatched.iloc[i].genres,
+            "release_date": moviesUnwatched.iloc[i].release_date.item(),
+            "vote_average": moviesUnwatched.iloc[i].vote_average.item(),
+            "revenue": moviesUnwatched.iloc[i].revenue.item(),
+            "popular_cast": moviesUnwatched.iloc[i].popular_cast,
+            "cover": moviesUnwatched.iloc[i].cover
+        })
+    data = sorted(data, key = lambda i: i['0'])
+    return json.dumps({ "message" : "success" , "data" : data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+
+
+
+
 if __name__ == "__main__":
     app.run(debug=True)
+
+#Chi Square
+#Feather format
+#Feedback
