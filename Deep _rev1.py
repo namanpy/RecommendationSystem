@@ -7,6 +7,7 @@ import numpy as np
 
 import torch.nn as nn
 import torch.nn.functional as F
+model_location = "Model/model_rev1.pth"
 
 folder_location = "Dataset/"
 model_location = "Model/model_rev1.pth"
@@ -135,7 +136,7 @@ class RatingDataset(Dataset):
             )
     except Exception as e:
       print("##### Index is  ",  idx)
-      print(self.data.loc[idx, "userId"])
+      print(e)
     #   torch.Tensor(self.data.loc[idx, "userId"].item()),  
     #   torch.Tensor(self.data.loc[idx, "movieId"].item()),
     #   torch.Tensor(movieGenreHash[self.data.loc[idx, "movieId"]]), 
@@ -163,11 +164,7 @@ class WreckEm(nn.Module):
 
     self.drop = torch.nn.Dropout(p=0.08)
   def forward(self, userId, movieId, genre, vote_average, release_date):
-    print("=>", userId, movieId)
-    print( (movieId) )
-    print( (userId) )
-    print((genre))
-    print(vote_average, release_date)
+
 
     try:
       x = torch.cat(  [ self.movie(movieId), F.relu(self.genreFc(genre)), self.user(userId), vote_average], 1) # 
@@ -190,7 +187,12 @@ moviesLen = int(ratings.movieId.max()) + 1
 
 model = WreckEm(moviesLen, usersLen)
 try:
-  model.load_state_dict(torch.load(model_location))
+  sdict = torch.load(model_location)
+
+  padding =  torch.zeros(usersLen - sdict["user.weight"].shape[0],20)
+  sdict["user.weight"] = torch.cat([sdict["user.weight"], padding], dim=0)
+ # print(padded.shape)
+  model.load_state_dict(sdict)
 except FileNotFoundError as e:
   print("No save file found.")
 
@@ -234,8 +236,9 @@ def Run():
       lossOverTime += loss.item()
       if(iters % 1000 == 0):
         
-        print("Loss is ", lossOverTime/iters)
-        print(output.item(), rating.item())
+        print("Loss is ", lossOverTime/1000)
+
+        lossOverTime = 0
       if(iters % 10000 == 0):
         print("Saving..")
         torch.save(model.state_dict(), model_location)
@@ -302,5 +305,5 @@ def RunBatch():
               print("Saving..")
               torch.save(model.state_dict(), model_location)
 
-#Run()
-Test()
+Run()
+# Test()

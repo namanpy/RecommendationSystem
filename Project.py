@@ -12,48 +12,73 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
-from Model.model import ParseGenre, WreckEm
+from Model.model import ParseGenre, WreckEm, ratingToData, dataToRating
 
 
 folder_location = "Dataset/"
 
 # LOAD CSV FILES
 
-users = pd.read_csv( folder_location + "users.dat", delimiter="::")
+#users = pd.read_csv( folder_location + "users.dat", delimiter="::")
 movies = pd.read_csv( folder_location + "movies_training.csv")
-ratings = pd.read_csv( folder_location + "ratings_training.csv", nrows=1000000)
+ratings = pd.read_csv( folder_location + "ratings_training.csv")
 links = pd.read_csv( folder_location + "links.csv", dtype={'imdbId': str })
+all_users = pd.read_csv( folder_location + "users.csv")
+
 
 
 print("Movies Data-Set len is ", len(movies))
 print("Total unique users ", len(ratings.userId.unique()))
 
 
+def SetNewUser(userId, ratingdf):
+  ratingdf = ratingdf[ratings.userId != userId]
+  return ratingdf
+ratings = SetNewUser(1000, ratings)
 
 #LOAD PYTHON MODEL
+use_cuda = False
 
-model_location = "Model/model_rev1.pth"
+# from google.colab import drive
+# drive.mount('/content/gdrive')
 
-usersLen = int(ratings.userId.max()) + 1
-moviesLen = int(ratings.movieId.max()) + 1
+device = torch.device("cuda" if use_cuda else "cpu")
+model_location = "Model/model_rev2.pth"
+
+usersLen = int(all_users.userId.max()) + 2
+moviesLen = int(ratings.movieId.max()) + 2
 
 model = WreckEm(moviesLen, usersLen)
+lossFn = torch.nn.MSELoss() 
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
 try:
-  model.load_state_dict(torch.load(model_location))
+  sdict = torch.load(model_location, map_location=device)
+
+  padding =  torch.zeros(usersLen - sdict["user.weight"].shape[0],20)
+  print(sdict["user.weight"].shape)
+  sdict["user.weight"] = torch.cat([sdict["user.weight"], padding], dim=0)
+  print(sdict["user.weight"].shape)
+
+  padding =  torch.zeros(moviesLen - sdict["movie.weight"].shape[0],20)
+  print(sdict["movie.weight"].shape)
+  sdict["movie.weight"] = torch.cat([sdict["movie.weight"], padding], dim=0)
+  print(sdict["movie.weight"].shape)
+
+  model.load_state_dict(sdict, strict=False)
 except FileNotFoundError as e:
   print("No save file found.")
 
-model.eval()
 
 
 
 
 # User x Movies - Matrix
-
-user_rating_matrix = pd.pivot_table(ratings, values="rating", index="userId",
-                    columns="movieId")           
-user_rating_matrix = user_rating_matrix.fillna(0)
+def BuildMatrix():
+  global user_rating_matrix
+  user_rating_matrix = pd.pivot_table(ratings, values="rating", index="userId",
+                      columns="movieId")           
+  user_rating_matrix = user_rating_matrix.fillna(0)
 
 
 
@@ -155,11 +180,7 @@ def GetSimilarMovies(movieId, movies):
   similarity = similarity.sort_values(by=["similarity"], ascending=False)
   similarity =  similarity[0 : 50]  
   return similarity
-  
-  #print(similarity.head(50))
-  #print(movies[movies.movie_id.isin(similarity.movie_id)].head())
 
-#GetSimilarMovies(3448)
 def GetFavoriteActors(userId):
   moviesRatedByUser = ratings[ratings.userId == userId]
   actorRating = {}
@@ -374,6 +395,17 @@ from flask_cors import CORS
 CORS(app)
 
 
+@app.route("/movies/filter/trending", methods=["POST"])
+def GetTopTrending():
+
+
+
+  movies_ = movies.sort_values(by=[ "release_date", "vote_average", "revenue"], ascending=False).iloc[0:50]
+  _data = (movies_.to_dict( orient='records'))
+  # print(_data)
+  return json.dumps({ "message" : "success" , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+
+
 
 
 
@@ -383,18 +415,21 @@ def GetCollabFiltering():
   if(body is not None and "user" in body.keys()):
     user = body["user"]
 
+    if(len(ratings[ratings.userId == user]) > 0):
 
-    similarity_index = GetSimilarUsers(user_rating_matrix, "cosine", user, 100)
-    recommended_movies  = RecommendMoviesByRating(similarity_index, user_rating_matrix, movies, 50)
-    recommended_movies = recommended_movies.to_frame()
-    recommended_movies = recommended_movies.merge(movies, left_index=True, right_index=True)
+      similarity_index = GetSimilarUsers(user_rating_matrix, "cosine", user, 100)
+      recommended_movies  = RecommendMoviesByRating(similarity_index, user_rating_matrix, movies, 50)
+      recommended_movies = recommended_movies.to_frame()
+      recommended_movies = recommended_movies.merge(movies, left_index=True, right_index=True)
 
-    print(similarity_index.head(10))
+      print(similarity_index.head(10))
 
-    recommended_movies.fillna(-1)
-    _data = (recommended_movies.to_dict( orient='records'))
+      recommended_movies.fillna(-1)
+      _data = (recommended_movies.to_dict( orient='records'))
 
-    return json.dumps({ "message" : "success" , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+      return json.dumps({ "message" : "success" , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+    else:
+      return json.dumps({ "message" : "success" , "data" : [] }), 200, {'Content-Type': 'application/json; charset=utf-8' }
   else:
     return { "error" : "User is not defined in request."} , 400
 
@@ -405,23 +440,26 @@ def GetSimilarItemFiltering():
   body = request.get_json()
   if(body is not None and "user" in body.keys()):
     user = body["user"]
+    if(len(ratings[ratings.userId == user]) > 0):
+      randomUserRating = ratings[ratings.userId == user].sample(n=1)
+      print(randomUserRating.head())
+      baseMovie = movies[movies.movieId == randomUserRating.movieId.item()] #Original
+      similarMovies = GetSimilarMovies(randomUserRating.movieId.item(), movies) #Original
 
-    randomUserRating = ratings[ratings.userId == user].sample(n=1)
-    baseMovie = movies[movies.movieId == randomUserRating.movieId.item()] #Original
-    similarMovies = GetSimilarMovies(randomUserRating.movieId.item(), movies) #Original
+      # baseMovie = movies[movies.movieId == 4896]
 
-    # baseMovie = movies[movies.movieId == 4896]
+      # similarMovies = GetSimilarMovies(4896, movies)
 
-    # similarMovies = GetSimilarMovies(4896, movies)
+      # print(similarMovies.head())
 
-    print(similarMovies.head())
+      baseMovie = baseMovie.to_dict(orient="records")
+      similarMovies.fillna(-1)
 
-    baseMovie = baseMovie.to_dict(orient="records")
-    similarMovies.fillna(-1)
+      _data = (similarMovies.to_dict( orient='records'))
 
-    _data = (similarMovies.to_dict( orient='records'))
-
-    return json.dumps({ "message" : "success" , "base_movie" : baseMovie , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+      return json.dumps({ "message" : "success" , "base_movie" : baseMovie , "data" : _data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+    else:
+      return json.dumps({ "message" : "success" , "base_movie" : [] , "data" : [] }), 200, {'Content-Type': 'application/json; charset=utf-8' }
   else:
     return { "error" : "User is not defined in request."} , 400
 
@@ -433,35 +471,93 @@ def AiFiltering():
     moviesWatchedByUser = ratings[ratings.userId == user].movieId
     
     moviesUnwatched = movies[~movies.movieId.isin(moviesWatchedByUser)]
-    moviesUnwatched = moviesUnwatched.sample(n=1000)
-
+    #moviesUnwatched = moviesUnwatched.sample(n=1000)
+    moviesUnwatched = moviesUnwatched.sort_values(by=["release_date"])
+    print(moviesUnwatched.release_date.head())
+    moviesUnwatched = moviesUnwatched.iloc[len(movies) - 10000: ]
+    moviesUnwatched = moviesUnwatched[moviesUnwatched.revenue != 0]
     data = []
     model.eval()
     for i in range(0, len(moviesUnwatched) - 1):
       userId = torch.LongTensor([ user ])
       movieId = torch.LongTensor([ moviesUnwatched.iloc[i]["movieId"].item() ])
       genre = torch.Tensor([ParseGenre(moviesUnwatched.iloc[i]["genres"])])
-      vote_average = torch.Tensor([ [  moviesUnwatched.iloc[i]["vote_average"].item()/ 10.0  ] ])
+      vote_average = torch.Tensor([   moviesUnwatched.iloc[i]["vote_average"].item()/ 10.0   ])
       release_date = None
       
+      userId = userId.unsqueeze(0)
+      movieId = movieId.unsqueeze(0)
+      genre = genre.unsqueeze(0)
+      vote_average = vote_average.unsqueeze(0)
       recommendation = model(userId, movieId, genre, vote_average, release_date)
-      
-      data.append( {
-            "0": recommendation.item(),
-            "movieId": moviesUnwatched.iloc[i].movieId.item(),
-            "title": moviesUnwatched.iloc[i].title,
-            "genres": moviesUnwatched.iloc[i].genres,
-            "release_date": moviesUnwatched.iloc[i].release_date.item(),
-            "vote_average": moviesUnwatched.iloc[i].vote_average.item(),
-            "revenue": moviesUnwatched.iloc[i].revenue.item(),
-            "popular_cast": moviesUnwatched.iloc[i].popular_cast,
-            "cover": moviesUnwatched.iloc[i].cover
-        })
-    data = sorted(data, key = lambda i: i['0'])
-    return json.dumps({ "message" : "success" , "data" : data }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+      if(recommendation != None):
+        data.append( {
+              "0": dataToRating(recommendation.tolist()),
+              "movieId": moviesUnwatched.iloc[i].movieId.item(),
+              "title": moviesUnwatched.iloc[i].title,
+              "genres": moviesUnwatched.iloc[i].genres,
+              "release_date": moviesUnwatched.iloc[i].release_date.item(),
+              "vote_average": moviesUnwatched.iloc[i].vote_average.item(),
+              "revenue": moviesUnwatched.iloc[i].revenue.item(),
+              "popular_cast": moviesUnwatched.iloc[i].popular_cast,
+              "cover": moviesUnwatched.iloc[i].cover
+          })
+    data = sorted(data, key = lambda i: i['0'], reverse=True)
 
 
+    return json.dumps({ "message" : "success" , "data" : data[0:50] }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+@app.route("/movies/feedback/ai", methods=["POST"])
+def AiFeedback():
+  body = request.get_json()
+  if(body is not None and "user" in body.keys() and "movieId" in body.keys() and "rating" in body.keys()):
+    user = body["user"]
+    movieId = body["movieId"]
+    
+    movie = movies[movies.movieId == int(movieId)]
+    
+    rating = body["rating"]
 
+    import time
+    global ratings
+    ratings = ratings.append({ "userId" : user, "movieId" : movieId , "rating" : rating, "timestamp" : time.time()}, ignore_index=True)
+    ratings.to_csv(folder_location + "ratings_training.csv", index=False)
+    print(rating, " to ", movie.title)
+
+    userId = torch.LongTensor([ user ])
+    movieId = torch.LongTensor([ int(movieId) ])
+    genre = torch.Tensor([ParseGenre(movie["genres"].item())])
+    vote_average = torch.Tensor([   movie["vote_average"].item()/ 10.0   ])
+    release_date = None
+    rating = torch.Tensor([ ratingToData(rating) ])
+    
+    userId = userId.unsqueeze(0)
+    movieId = movieId.unsqueeze(0)
+    genre = genre.unsqueeze(0)
+    vote_average = vote_average.unsqueeze(0)
+    # rating = rating.unsqueeze(0)
+    model.train()
+
+    for i in range(0, 100):
+      optimizer.zero_grad()
+      recommendation = model(userId, movieId, genre, vote_average, release_date)
+      print(rating.shape, recommendation.shape)
+      loss = lossFn(recommendation, rating)
+
+      loss.backward()
+      optimizer.step()
+    BuildMatrix()
+    return json.dumps({ "message" : "success"  }), 200, {'Content-Type': 'application/json; charset=utf-8' }
+
+@app.route("/user/new", methods=["POST"])
+def CreateUser():
+  lastUser = all_users.iloc[-1]
+  newUser = lastUser.userId.item() + 1
+  print(newUser)
+  all_users_ = all_users.append({ "userId" : newUser }, ignore_index=True)
+  print(all_users_.iloc[-1])
+  all_users_.to_csv(folder_location + "users.csv", index=False)
+  
+  return json.dumps({ "message" : "success" , "user" : newUser }), 200, {'Content-Type': 'application/json; charset=utf-8' }
 
 if __name__ == "__main__":
     app.run(debug=True)

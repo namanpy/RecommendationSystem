@@ -152,16 +152,16 @@ class WreckEm(nn.Module):
     super(WreckEm, self).__init__()
 
     print("=>", usersLen, moviesLen)
-    self.movie = nn.Embedding(moviesLen, 20)
-    self.user = nn.Embedding(usersLen,  20)
+    self.movie = nn.Embedding(moviesLen, 32)
+    self.user = nn.Embedding(usersLen,  32)
     
-    self.genreFc = nn.Linear(len(genresHashmap.keys()) , 16)
+    self.genreFc = nn.Linear(len(genresHashmap.keys()) , 24)
     
-    self.fc1 = nn.Linear(57, 128)
-    self.fc2 = nn.Linear(128 ,256)
-    self.fc3 = nn.Linear(256, 128)
-    self.fc4 = nn.Linear(128, 32)
-    self.fc5 = nn.Linear(32, 1)
+    self.fc1 = nn.Linear(89, 256)
+    self.fc2 = nn.Linear(256 ,512)
+    self.fc3 = nn.Linear(512, 256)
+    self.fc4 = nn.Linear(256, 128)
+    self.fc5 = nn.Linear(128, 1)
 
     self.drop = torch.nn.Dropout(p=0.08)
     self.drop2 = torch.nn.Dropout(p=0.04)
@@ -308,5 +308,5 @@ def RunBatch():
               print("Saving..")
               torch.save(model.state_dict(), model_location)
 
-# Run()
+#Run()
 Test()
